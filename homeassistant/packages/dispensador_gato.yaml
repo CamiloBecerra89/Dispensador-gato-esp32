@@ -1,0 +1,232 @@
+# ============================================================
+#  HOME ASSISTANT – PACKAGE: Dispensador Comida Gato (KOBA 7L)
+#  Archivo: packages/dispensador_gato.yaml
+#
+#  INSTRUCCIONES DE INSTALACIÓN:
+#  ──────────────────────────────────────────────────────────
+#  1. Copia este archivo en la carpeta:
+#        <config>/packages/dispensador_gato.yaml
+#     (si la carpeta "packages" no existe, créala)
+#
+#  2. Añade UNA SOLA VEZ estas dos líneas en configuration.yaml
+#     (si ya tienes "homeassistant:" definido, agrega solo
+#      la línea "packages:"):
+#
+#       homeassistant:
+#         packages: !include_dir_named packages
+#
+#  3. Reinicia Home Assistant:
+#       Developer Tools → Restart
+#
+#  4. Añade la tarjeta Lovelace al dashboard:
+#       Dashboard → Editar → Añadir tarjeta → Manual
+#       → pega el bloque YAML de la sección "TARJETA LOVELACE"
+#         al final de este archivo (quita los # de comentario).
+#
+#  MQTT: asegúrate de tener el broker Mosquitto configurado
+#  y de que el ESP32 esté publicando en los topics indicados.
+# ============================================================
+
+# ════════════════════════════════════════════════════════════
+#  SENSORES MQTT
+# ════════════════════════════════════════════════════════════
+mqtt:
+  sensor:
+    - name: "Nivel Dispensador Gato"
+      unique_id: dispensador_gato_nivel
+      state_topic: "mascota/dispensador/nivel_pct"
+      unit_of_measurement: "%"
+      device_class: battery
+      state_class: measurement
+      value_template: "{{ value | float(0) | round(1) }}"
+      expire_after: 180
+      icon: mdi:food-variant
+
+    - name: "Distancia Dispensador Gato"
+      unique_id: dispensador_gato_distancia
+      state_topic: "mascota/dispensador/distancia_cm"
+      unit_of_measurement: "cm"
+      state_class: measurement
+      value_template: "{{ value | float(0) | round(1) }}"
+      expire_after: 180
+      icon: mdi:ruler
+
+    - name: "Estado Dispensador Gato"
+      unique_id: dispensador_gato_estado
+      state_topic: "mascota/dispensador/estado"
+      expire_after: 180
+      icon: mdi:cat
+
+# ════════════════════════════════════════════════════════════
+#  SENSOR TEMPLATE (resumen con emoji)
+# ════════════════════════════════════════════════════════════
+template:
+  - sensor:
+      - name: "Dispensador Gato Resumen"
+        unique_id: dispensador_gato_resumen
+        state: >
+          {% set nivel = states('sensor.nivel_dispensador_gato') | float(-1) %}
+          {% if nivel < 0 %}
+            Sin dato
+          {% elif nivel <= 5 %}
+            Casi vacío 🚨
+          {% elif nivel <= 30 %}
+            Nivel bajo ⚠️
+          {% else %}
+            Nivel OK ✅
+          {% endif %}
+        icon: >
+          {% set nivel = states('sensor.nivel_dispensador_gato') | float(-1) %}
+          {% if nivel <= 5 %}    mdi:cat-alert
+          {% elif nivel <= 30 %} mdi:alert-circle-outline
+          {% else %}             mdi:check-circle-outline
+          {% endif %}
+        attributes:
+          nivel_pct: >
+            {{ states('sensor.nivel_dispensador_gato') | float(0) }}
+          distancia_cm: >
+            {{ states('sensor.distancia_dispensador_gato') | float(0) }}
+          estado: >
+            {{ states('sensor.estado_dispensador_gato') }}
+          ultima_actualizacion: >
+            {{ now().strftime('%d/%m/%Y %H:%M') }}
+
+# ════════════════════════════════════════════════════════════
+#  AUTOMATIZACIONES
+# ════════════════════════════════════════════════════════════
+automation:
+  - id: dispensador_gato_nivel_bajo
+    alias: "Dispensador Gato – Nivel Bajo (≤30%)"
+    description: "Notificación cuando el nivel cae por debajo del 30%"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.nivel_dispensador_gato
+        below: 30
+        for:
+          minutes: 2
+    action:
+      - service: notify.notify
+        data:
+          title: "⚠️ Dispensador gato – Nivel bajo"
+          message: >
+            El dispensador está al {{ states('sensor.nivel_dispensador_gato') }}%.
+            Considera rellenarlo pronto.
+    mode: single
+
+  - id: dispensador_gato_vacio
+    alias: "Dispensador Gato – Casi vacío (≤5%)"
+    description: "Notificación urgente cuando el nivel es crítico"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.nivel_dispensador_gato
+        below: 5
+        for:
+          minutes: 1
+    action:
+      - service: notify.notify
+        data:
+          title: "🚨 ¡Dispensador gato VACÍO!"
+          message: >
+            El dispensador está al {{ states('sensor.nivel_dispensador_gato') }}%.
+            ¡Recarga urgente!
+    mode: single
+
+  - id: dispensador_gato_repuesto
+    alias: "Dispensador Gato – Repuesto (>50%)"
+    description: "Confirmación cuando el dispensador vuelve a nivel normal"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.nivel_dispensador_gato
+        above: 50
+    condition:
+      - condition: template
+        value_template: >
+          {{ states('sensor.nivel_dispensador_gato') | float(0) > 50 }}
+    action:
+      - service: notify.notify
+        data:
+          title: "✅ Dispensador gato repuesto"
+          message: >
+            El dispensador fue recargado. Nivel actual:
+            {{ states('sensor.nivel_dispensador_gato') }}%.
+    mode: single
+
+# ════════════════════════════════════════════════════════════
+#  TARJETA LOVELACE – OPCIÓN A: Mushroom Cards (HACS)
+#  Instala "Mushroom" desde HACS antes de usar esta tarjeta.
+#  Dashboard → Editar → Añadir tarjeta → Manual → pega esto:
+# ════════════════════════════════════════════════════════════
+#
+# type: vertical-stack
+# cards:
+#   - type: custom:mushroom-title-card
+#     title: "\U0001F431 Dispensador de comida"
+#     subtitle: Koba 7L
+#
+#   - type: custom:mushroom-template-card
+#     primary: "{{ states('sensor.dispensador_gato_resumen') }}"
+#     secondary: >
+#       Nivel: {{ states('sensor.nivel_dispensador_gato') }}%
+#       · Distancia: {{ states('sensor.distancia_dispensador_gato') }} cm
+#       · Actualizado: {{ state_attr('sensor.dispensador_gato_resumen','ultima_actualizacion') }}
+#     icon: mdi:food-variant
+#     icon_color: >
+#       {% set n = states('sensor.nivel_dispensador_gato') | float(0) %}
+#       {% if n <= 5 %}   red
+#       {% elif n <= 30 %} orange
+#       {% else %}         green
+#       {% endif %}
+#     tap_action:
+#       action: more-info
+#       entity: sensor.nivel_dispensador_gato
+#
+#   - type: gauge
+#     entity: sensor.nivel_dispensador_gato
+#     name: Nivel de comida
+#     min: 0
+#     max: 100
+#     needle: true
+#     segments:
+#       - from: 0
+#         color: "#db4437"
+#       - from: 6
+#         color: "#f4b400"
+#       - from: 31
+#         color: "#0f9d58"
+
+
+# ════════════════════════════════════════════════════════════
+#  TARJETA LOVELACE – OPCIÓN B: Nativa (sin HACS)
+#  Dashboard → Editar → Añadir tarjeta → Manual → pega esto:
+# ════════════════════════════════════════════════════════════
+#
+# type: vertical-stack
+# cards:
+#   - type: markdown
+#     content: "## \U0001F431 Dispensador de comida – Koba 7L"
+#
+#   - type: gauge
+#     entity: sensor.nivel_dispensador_gato
+#     name: Nivel de comida
+#     min: 0
+#     max: 100
+#     needle: true
+#     segments:
+#       - from: 0
+#         color: "#db4437"
+#       - from: 6
+#         color: "#f4b400"
+#       - from: 31
+#         color: "#0f9d58"
+#
+#   - type: entities
+#     title: Detalle
+#     entities:
+#       - entity: sensor.nivel_dispensador_gato
+#         name: Nivel (%)
+#       - entity: sensor.distancia_dispensador_gato
+#         name: Distancia (cm)
+#       - entity: sensor.estado_dispensador_gato
+#         name: Estado
+#       - entity: sensor.dispensador_gato_resumen
+#         name: Resumen
